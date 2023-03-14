@@ -1,0 +1,287 @@
+import sys 
+from PyQt5.QtWidgets import QApplication,  QPushButton, QLabel,QGridLayout,QLineEdit, QHBoxLayout,QVBoxLayout,QWidget,QRadioButton,QFileDialog
+from PyQt5.QtCore import Qt
+import os
+import cx_Oracle
+import pandas as pd
+import pymysql
+from pathlib import Path
+
+class Exam(QWidget):
+    def __init__(self):
+        super().__init__()
+        self.initUI()
+    
+    def initUI(self):
+        #프로그램 형태 만들기
+        grid = QGridLayout()
+        grid.addWidget(QLabel("Database Type :"),0,0) 
+        grid.addWidget(QLabel("Schema Name :"),1,0)
+        grid.addWidget(QLabel("Database Name :"),2,0)
+        grid.addWidget(QLabel("Host Address :"),3,0)
+        grid.addWidget(QLabel("Port Number :"),4,0)
+        grid.addWidget(QLabel("User :"),5,0)
+        grid.addWidget(QLabel("Password :"),6,0)
+        grid.addWidget(QLabel("Path:"),7,0)
+        self.PATH = QLabel(" ")
+        grid.addWidget(self.PATH,7,1)
+        #입력 변수 생성
+        self.result = QLabel("Default")
+        self.oracle = QRadioButton("oracle")
+        self.mysql = QRadioButton("mysql")
+        self.mariadb = QRadioButton("mariadb")
+        self.SCHEMA = QLineEdit()
+        self.DB_NAME = QLineEdit()
+        self.HOST = QLineEdit()
+        self.PORT = QLineEdit()
+        self.USER = QLineEdit()
+        self.PW = QLineEdit()
+        self.PW.setEchoMode(QLineEdit.Password)
+        self.SEARCH_BUTTON = QPushButton("찾아보기...")
+        self.SEARCH_BUTTON.clicked.connect(self.PATH_SELECT)
+        #입력칸 배치
+        typehbox = QHBoxLayout()
+        typehbox.addWidget(self.oracle,0)
+        typehbox.addWidget(self.mysql,1)
+        typehbox.addWidget(self.mariadb,2)
+        grid.addLayout(typehbox,0,1)
+        grid.addWidget(self.SCHEMA,1,1)
+        grid.addWidget(self.DB_NAME,2,1)
+        grid.addWidget(self.HOST,3,1)
+        grid.addWidget(self.PORT,4,1)
+        grid.addWidget(self.USER,5,1)
+        grid.addWidget(self.PW,6,1)
+        grid.addWidget(self.SEARCH_BUTTON,7,2)
+
+        #DB선택 라디오버튼
+        self.oracle.toggled.connect(self.DBTYPE)
+        self.mysql.toggled.connect(self.DBTYPE)
+        self.mariadb.toggled.connect(self.DBTYPE)
+        #생성,취소버튼
+        CreateButton = QPushButton("생성")
+        CancleButton = QPushButton("취소")
+        CreateButton.clicked.connect(self.Createtable)
+        CancleButton.clicked.connect(self.close)
+
+        hbox = QHBoxLayout()
+        hbox.addStretch(1)
+        hbox.addWidget(CreateButton)
+        hbox.addWidget(CancleButton)
+
+
+        vbox = QVBoxLayout()
+        vbox.addLayout(grid)
+        vbox.addWidget(self.result)
+        vbox.addLayout(hbox)
+
+        self.setLayout(vbox)
+
+        
+        self.setGeometry(400,400,400,300)
+        self.setWindowTitle('DDL Maker')
+        self.show()
+    
+    def PATH_SELECT(self):
+        dirName = QFileDialog.getExistingDirectory(self,self.tr("Open Data file"),"./",QFileDialog.ShowDirsOnly)
+        self.dirName = dirName.replace('''/''','''\\''')
+        self.PATH.setText(dirName)
+        return dirName
+        
+        #DB에 따라 입력칸 보이기 or 안보이기
+    def DBTYPE(self):
+        radioBtn = self.sender()
+        if radioBtn.isChecked():
+            self.DB_TYPE = radioBtn.text()
+        if radioBtn.text() == 'mysql' or radioBtn.text()=='mariadb':
+            self.SCHEMA.hide()
+        elif radioBtn.text() == 'oracle':
+            self.SCHEMA.show()
+        #종료 함수
+    def close(self):
+        sys.exit()
+        #생성 함수
+    def Createtable(self):
+        #try:
+            database = self.DB_TYPE
+            db = self.SCHEMA.text() #Schema Name에서 입력받은 값
+            dbname = self.DB_NAME.text() #Database Name에서 입력받은 값
+            host = self.HOST.text() #Host Address 에서 입력받은 값
+            port = self.PORT.text() #Port number 에서 입력받은 값 (str형)
+            user = self.USER.text() #User 에서 입력받은 값
+            password = self.PW.text() #Password 에서 입력받은 값
+            dirName = self.dirName #'찾아보기'로 선택한 경로
+
+            if database == 'oracle':
+                LOCATION=str(Path.cwd())+"\instantclient-basic-windows.x64-21.7.0.0.0dbru\instantclient_21_7" #오라클 인스턴트클라이언트 위치 (실행파일과 같은 위치에 있어야 합니다.)
+                os.environ["PATH"] = LOCATION + ";" + os.environ["PATH"]
+                dsn=cx_Oracle.makedsn(host,int(port),dbname)
+                con=cx_Oracle.connect(user,password,dsn,encoding='UTF-8')
+                cursor=con.cursor()
+            elif database == 'mysql' or database == 'mariadb':
+                conn = pymysql.connect(host=host,port=int(port),user=user, password=password,db=dbname,charset='utf8')
+            else :
+                return print('지원하지않는DB입니다')
+            result=[]
+            table_list=[]
+            #테이블 목록 가져오기
+            if database == 'oracle':
+                cursor.execute("SELECT A.TABLE_NAME, B.COMMENTS AS TABLE_COMMENTS, A.COLUMN_NAME, C.COMMENTS AS COLUMN_COMMENTS, A.DATA_TYPE, CASE WHEN DATA_TYPE IN ('CLOB','BLOB', 'NCLOB', 'BFILE') THEN NULL ELSE A.DATA_LENGTH END AS DATA_LENGTH, A.DATA_PRECISION, A.DATA_SCALE, A.NULLABLE, CASE WHEN D.POSITION IS NOT NULL THEN 'PK' ELSE ' ' END AS PK FROM ALL_TAB_COLUMNS A LEFT OUTER JOIN ALL_TAB_COMMENTS B ON A.TABLE_NAME = B.TABLE_NAME AND A.OWNER = B.OWNER LEFT OUTER JOIN ALL_COL_COMMENTS C ON A.TABLE_NAME = C.TABLE_NAME AND A.COLUMN_NAME = C.COLUMN_NAME AND A.OWNER = C.OWNER LEFT OUTER JOIN ALL_CONS_COLUMNS D ON A.TABLE_NAME = D.TABLE_NAME AND A.COLUMN_NAME = D.COLUMN_NAME AND A.OWNER = D.OWNER AND D.POSITION IS NOT NULL WHERE A.OWNER = '" + db+ "' AND DATA_TYPE != 'UNDEFINED' ORDER BY A.TABLE_NAME, A.COLUMN_ID")
+                x=cursor.fetchall()
+                df=pd.DataFrame(x)
+                col_names = [row[0] for row in cursor.description]
+                df.columns = col_names
+            elif database == 'mysql' or database =='mariadb':
+                df = pd.read_sql_query("SELECT A.TABLE_NAME, A.TABLE_COMMENT AS TABLE_COMMENTS, B.COLUMN_NAME, B.COLUMN_COMMENT AS COLUMN_COMMENTS, B.DATA_TYPE, CASE WHEN B.DATA_TYPE IN ('TEXT','MEDIUMTEXT','LONGTEXT','BLOB','MEDIUMBLOB','LONGBLOB') THEN NULL ELSE B.CHARACTER_MAXIMUM_LENGTH END AS DATA_LENGTH, B.NUMERIC_PRECISION AS DATA_PRECISION, B.NUMERIC_SCALE AS DATA_SCALE, LEFT(B.IS_NULLABLE,1) AS NULLABLE, CASE WHEN B.COLUMN_KEY = 'PRI' THEN 'PK' ELSE NULL END AS PK FROM information_schema.TABLES A INNER JOIN information_schema.COLUMNS B ON A.TABLE_SCHEMA = B.TABLE_SCHEMA AND A.TABLE_NAME = B.TABLE_NAME WHERE A.TABLE_SCHEMA = '" + dbname + "' AND A.TABLE_TYPE = 'BASE TABLE' ORDER BY A.TABLE_NAME, B.ORDINAL_POSITION;", conn)
+            else :
+                return print('지원하지않는DB입니다')
+            
+            if database == 'oracle':
+                table_list=[]
+                for i in df.TABLE_NAME:
+                    table_list.append(i)
+                table_set=set(table_list)
+                query_list=[]
+                for j in table_set:
+                    text=[]
+                    pk_cnt=0
+                    temp_df=df.loc[df['TABLE_NAME']==j]
+                    text.append("CREATE TABLE "+j+"(")
+                    for i in range(0,len(temp_df)):
+                        text.append(temp_df.iloc[i]['COLUMN_NAME'])
+                        text.append(" ")
+                        text.append(temp_df.iloc[i]['DATA_TYPE'])
+                        if pd.notnull(temp_df.iloc[i]['DATA_SCALE']):
+                            text.append("(")
+                            text.append(temp_df.iloc[i]['DATA_PRECISION'].astype(int))
+                            text.append(",")
+                            text.append(temp_df.iloc[i]['DATA_SCALE'].astype(int))
+                            text.append(") ")
+                        elif pd.notnull(temp_df.iloc[i]['DATA_LENGTH']):
+                            text.append("(")
+                            text.append(temp_df.iloc[i]['DATA_LENGTH'].astype(int))
+                            text.append(") ")
+                        else:
+                            text.append(" ")
+                        if temp_df.iloc[i]['NULLABLE']=='N':
+                            text.append("NOT NULL ")
+                        if temp_df.iloc[i]['PK']=='PK':
+                            pk_cnt +=1
+                        text.append(",")
+                        comment=temp_df.iloc[i]['TABLE_COMMENTS']
+                    if pk_cnt != 0 :
+                        text.append("PRIMARY KEY (")
+                    for i in range(0,len(temp_df)):
+                        if temp_df.iloc[i]['TABLE_NAME']==j and temp_df.iloc[i]['PK']=="PK":
+                            text.append(temp_df.iloc[i]['COLUMN_NAME'])
+                            text.append(",")
+                    text.pop(-1)
+                    text.append(") );")
+                    comment_text=[]
+                    comment_text.append("COMMENT ON TABLE "+j)
+                    comment_text.append("IS '"+str(comment))
+                    comment_text.append("';")
+                    for i in range(0,len(temp_df)):
+                        if temp_df.iloc[i]['TABLE_NAME']==j:
+                            comment_text.append("COMMENT ON COLUMN "+j+"."+temp_df.iloc[i]["COLUMN_NAME"]+" IS '")
+                            comment_text.append(str(temp_df.iloc[i]["COLUMN_COMMENTS"])+"';")
+                    query=''
+                    for k in text:
+                        query += str(k)
+                    for m in comment_text:
+                        query+=m
+                    query_list.append(query)
+                    
+                    with open(self.dirName + """/{}.txt""".format(j),'w',encoding="UTF-8") as f:
+                            f.write(query)
+                all_create=''
+                for k in query_list:
+                    all_create+=k
+                with open(self.dirName + """/{}.txt""".format('ALL'),'w',encoding="UTF-8") as f:
+                    f.write(all_create)
+                return self.result.setText(str(len(query_list)+1)+ '개의 CREATE 파일이 생성 되었습니다')
+            #마리아디비
+            if database == 'mariadb' or database == 'mysql':
+                table_list=[]
+                for i in df.TABLE_NAME:
+                    table_list.append(i)
+                table_set=set(table_list)
+                query_list=[]
+                for j in table_set:
+                    text=[]
+                    pk_cnt=0
+                    temp_df=df.loc[df['TABLE_NAME']==j]
+                    text.append("CREATE TABLE "+j+"(")
+                    for i in range(0,len(temp_df)):
+                        text.append(temp_df.iloc[i]['COLUMN_NAME'])
+                        text.append(" ")
+                        text.append(temp_df.iloc[i]['DATA_TYPE'])
+                        if pd.notnull(temp_df.iloc[i]['DATA_SCALE']):
+                            text.append("(")
+                            text.append(temp_df.iloc[i]['DATA_PRECISION'].astype(int))
+                            if temp_df.iloc[i]['DATA_SCALE'] != 0:
+                                text.append(",")
+                                text.append(temp_df.iloc[i]['DATA_SCALE'].astype(int))
+                            text.append(") ")
+                        elif pd.notnull(temp_df.iloc[i]['DATA_LENGTH']):
+                            text.append("(")
+                            text.append(temp_df.iloc[i]['DATA_LENGTH'].astype(int))
+                            text.append(") ")
+                        else:
+                            text.append(" ")
+                        if temp_df.iloc[i]['NULLABLE']=='N':
+                            text.append("NOT NULL ")
+                        if temp_df.iloc[i]['PK']=='PK':
+                            pk_cnt +=1
+                        if temp_df.iloc[i]['COLUMN_COMMENTS']=='':
+                            text.append(",")
+                        else:
+                            text.append(" COMMENT '")
+                            text.append(temp_df.iloc[i]['COLUMN_COMMENTS'])
+                            text.append("'")
+                            text.append(",")
+                        comment=temp_df.iloc[i]['TABLE_COMMENTS']
+                    if pk_cnt != 0 :
+                        text.append("PRIMARY KEY (")
+                        for i in range(0,len(temp_df)):
+                            if temp_df.iloc[i]['PK']=="PK":
+                                text.append(temp_df.iloc[i]['COLUMN_NAME'])
+                                text.append(",")
+                    text.pop(-1)
+                    if pk_cnt != 0:
+                        text.append("))")
+                    else :
+                        text.append(")")
+                    text.append(" ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='")
+                    text.append(comment)
+                    text.append("';")
+                    query=''
+                    for k in text:
+                        query += str(k)
+                    query_list.append(query)
+                    with open(self.dirName + """/{}.txt""".format(j),'w',encoding="UTF-8") as f:
+                            f.write(query)
+                all_create=''
+                for k in query_list:
+                    all_create+=k
+                with open(self.dirName + """/{}.txt""".format('ALL'),'w',encoding="UTF-8") as f:
+                    f.write(all_create)
+                return self.result.setText(str(len(query_list)+1)+ '개의 CREATE 파일이 생성 되었습니다')
+        #except AttributeError:
+        #    return self.result.setText("DB타입이 선택되지않았거나 파일, 저장경로가 선택되지않았습니다.")
+
+
+
+    def tglStat(self,state):
+        if state:
+            self.statusBar().show()
+        else:
+            self.statusBar().hide()
+
+    def keyPressEvent(self, e) :
+        if e.key() == Qt.Key_Escape:
+            self.close()
+
+if __name__ == '__main__':
+    app = QApplication(sys.argv)
+    w = Exam()
+    sys.exit(app.exec_())
